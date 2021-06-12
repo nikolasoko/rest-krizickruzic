@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
 
-# Create your models here.
+#Game model zadužen za osnovne informacije o igri
 class Game(models.Model):
     first_player = models.ForeignKey(User, related_name='first_player', on_delete=models.CASCADE)
     second_player = models.ForeignKey(User,related_name='second_player',blank=True, null=True, on_delete=models.CASCADE)
@@ -13,7 +13,7 @@ class Game(models.Model):
 
 
 
-
+#klasa koja sadrži infomarcije o svakom potezu: id igrača koji su igrali, id igre i koordinatepoteza na polju
 class Move(models.Model):
     player = models.ForeignKey(User, on_delete=models.CASCADE)
     game_id = models.ForeignKey(Game, on_delete=models.CASCADE)

@@ -9,24 +9,26 @@ from django.http import JsonResponse
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework import status
+from django.db.models import Q
 
 
 
-GAMESTATUS={'o':'open','progress':'','f':'finished'}
 
 
+#klasa zadužene za paginaciju
 class CustomPagination(pagination.PageNumberPagination):
     page_size = 2
     page_size_query_param = 'page_size'
     max_page_size = 50
     page_query_param = 'p'
 
+#klasa za kreiranje nove igre
 class CreateGame(generics.CreateAPIView):
     serializer_class = GameSerializer
 
 
 
-
+#funkcija koja pridružuje igrača određenoj igri ovisno o primljenom id-u igre i mjenja status igre u "u tijeku"
 @api_view(['PATCH',])
 def joinGame(request):
     id = request.POST.get('id', False)
@@ -40,24 +42,26 @@ def joinGame(request):
     serializer = GameSerializer(game)
     return Response(serializer.data)
 
-
+#paginirani pregled svih igara počevši od najnovijih
 class GameList(generics.ListCreateAPIView):
     queryset = Game.objects.all().order_by('-created')
     serializer_class = GameSerializer
     pagination_class = CustomPagination
-    
+
+
+#filtrira sve igre ovisno o igraču,vremenu nastanka i statusu igre
 class FilteredGameList(generics.ListCreateAPIView):
     serializer_class = GameSerializer
 
     def get_queryset(self):
 
         queryset = Game.objects.all()
-        username = self.request.query_params.get('first_player', None)
+        username = self.request.query_params.get('player', None)
         status = self.request.query_params.get('game_status')
         date = self.request.query_params.get('created')
         before_flag=self.request.query_params.get('before_flag')
         if username is not None:
-            queryset = queryset.filter(first_player__username=username)
+            queryset = queryset.filter(Q(first_player__username=username) | Q(second_player__username=username))
         if status is not None:
             queryset = queryset.filter(game_status=status)
         if date is not None:
@@ -66,7 +70,7 @@ class FilteredGameList(generics.ListCreateAPIView):
             else:
                 queryset = queryset.filter(created__gt=date)
         return queryset    
-
+#klasa prima id igre a vraca sve poteze oba igrača koji su odigrani u toj igri
 class GameStatus(generics.ListAPIView):
     serializer_class = MoveSerializer
 
@@ -76,7 +80,10 @@ class GameStatus(generics.ListAPIView):
         queryset = queryset.filter(game_id__id=id)
         return queryset
 
+#provjeravamo dosadašnje stanje ploče i vračamo true ukoliko je igra završila a false ako se igra nastavlja
 def checkWin(game:Game):
+
+    #lista lista koje sadrže koordinate poteza koji donose pobjedu
     WIN=[[(0,0),(0,1),(0,2)],
         [(1,0),(1,1),(1,2)],
         [(2,0),(2,1),(2,2)],
@@ -91,7 +98,7 @@ def checkWin(game:Game):
     firstPlayermMoves=queryset.filter(player=game.first_player)
     secondPlayerMoves=queryset.filter(player=game.second_player) 
     
-    
+    #radimo listu poteza koje je prvi igrač dosada odigrao i provjeravamo postoji li kombinacija za pobjedu 
     firstList=[]
     for move in firstPlayermMoves:
         x=move.board_column
@@ -104,9 +111,9 @@ def checkWin(game:Game):
             serializer = GameSerializer(game)
             game.winner=game.first_player
             game.game_status="finished"
-            game.save
+            game.save()
             return True
-
+    #radimo listu poteza koje je drugi igrač dosada odigrao i provjeravamo postoji li kombinacija za pobjedu
     secondList=[]
     for move in secondPlayerMoves:
         x=move.board_column
@@ -119,22 +126,24 @@ def checkWin(game:Game):
             serializer = GameSerializer(game)
             game.winner=game.second_player
             game.game_status="finished"
-            game.save
+            game.save()
             return True
-
+    #provjera jesu li sva polja popunjena bez pobjednika
     totalMoves=len(firstList) + len(secondList)
     if (totalMoves==9):
         serializer = GameSerializer(game)
         game.game_status="finished"
-        game.save
+        game.save()
+        return True
     return False
     
     
     
-
+#klasa zadužena za dodavanje poteza u bazu
 class MakeMove(generics.CreateAPIView):
     serializer_class = MoveSerializer
 
+    #POST metoda prima username korisnika koji radi potez i id igre za u kojoj se potez odigrava
     def post(self,request):
         queryset = Move.objects.all()
         id=request.data['game_id']
@@ -156,13 +165,14 @@ class MakeMove(generics.CreateAPIView):
                     },status=409
                 )
         m = MoveSerializer(data=request.data)
+        #u slučaju da je potez proša sve validacije spremamo ga u u bazu i proveravamo stanje igre nakon poteza
         if m.is_valid():
             m.save()
             gameOver=checkWin(game)
             if (gameOver):
                 g = GameSerializer(game)
-                g.save
-                if game.winner.username=="":
+                game.save()
+                if game.winner is None:
                     return Response("Igra je završila neriješeno")
                 return Response("Igra je završena, pobjednik je " + game.winner.username)
             return Response(m.data, status=201)
